@@ -43,9 +43,9 @@ describe("CodexUsageFormat.compactGaugeText", () => {
   })
 })
 
-describe("CodexUsageFormat.shortReset", () => {
-  it("keeps reset details compact", () => {
-    expect(CodexUsageFormat.shortReset(null, new Date(0))).toBe("?")
-    expect(CodexUsageFormat.shortReset(3_600, new Date(0))).toBe("1h")
+describe("CodexUsageFormat.resetAt", () => {
+  it("shows the local weekday and time instead of a countdown", () => {
+    expect(CodexUsageFormat.resetAt(null, new Date(0))).toBe("?")
+    expect(CodexUsageFormat.resetAt(3_600, new Date(0))).toMatch(/^[A-Z][a-z]{2} \d{1,2}:\d{2} [AP]M$/)
   })
 })

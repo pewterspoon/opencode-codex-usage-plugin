@@ -235,11 +235,17 @@ function UsageGauges(usage: Usage.CodexUsage, theme: () => TuiTheme) {
   setProp(row, "columnGap", 1)
   insertNode(root, row)
   if (usage.fiveHour) insertNode(row, UsageGauge("5h", usage.fiveHour, theme, gaugeWidth))
-  if (usage.weekly) insertNode(row, UsageGauge("week", usage.weekly, theme, gaugeWidth))
+  if (usage.weekly) insertNode(row, UsageGauge("week", usage.weekly, theme, gaugeWidth, Boolean(usage.fiveHour)))
   return root
 }
 
-function UsageGauge(label: string, window: Usage.UsageWindow | null, theme: () => TuiTheme, width: number) {
+function UsageGauge(
+  label: string,
+  window: Usage.UsageWindow | null,
+  theme: () => TuiTheme,
+  width: number,
+  separator = false,
+) {
   const root = createElement("box")
   const barLine = createElement("box")
   const detailLine = createElement("box")
@@ -253,23 +259,27 @@ function UsageGauge(label: string, window: Usage.UsageWindow | null, theme: () =
 
   const fillText = createElement("text")
   const trackText = createElement("text")
+  const separatorText = createElement("text")
   const percentText = createElement("text")
   const resetText = createElement("text")
   insert(fillText, () => usageGauge(window?.usedPercent ?? 0, width).fill)
   insert(trackText, () => usageGauge(window?.usedPercent ?? 0, width).track)
+  insert(separatorText, () => (separator && window ? " · " : ""))
   insert(percentText, () => (window ? Usage.formatPercent(window.usedPercent) : "--"))
-  insert(resetText, () => (window ? ` · ${shortReset(window.resetsAt)}` : ""))
+  insert(resetText, () => (window ? ` ${resetAt(window.resetsAt)}` : ""))
   effect(() => {
     const color = window ? levelColor(window.usedPercent, theme()) : theme().textMuted
     setProp(fillText, "fg", color)
     setProp(percentText, "fg", color)
     setProp(trackText, "fg", theme().textMuted)
+    setProp(separatorText, "fg", theme().textMuted)
     setProp(resetText, "fg", theme().textMuted)
   })
 
   insertNode(barLine, labelText)
   insertNode(barLine, fillText)
   insertNode(barLine, trackText)
+  insertNode(detailLine, separatorText)
   insertNode(detailLine, percentText)
   insertNode(detailLine, resetText)
   insertNode(root, barLine)
@@ -320,11 +330,18 @@ function levelColor(percent: number, theme: TuiTheme): TuiColor {
   return theme.success
 }
 
-function shortReset(unixSeconds: number | null, now = new Date()): string {
-  const formatted = Usage.formatResetTime(unixSeconds, now)
-  if (formatted === "reset unknown") return "?"
-  if (formatted === "resets now") return "now"
-  return formatted.replace("resets in ", "")
+function resetAt(unixSeconds: number | null, now = new Date()): string {
+  if (!unixSeconds) return "?"
+
+  const reset = new Date(unixSeconds * 1000)
+  if (!Number.isFinite(reset.getTime())) return "?"
+  if (reset.getTime() <= now.getTime()) return "now"
+
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(reset)
 }
 
 function compactGaugeText(usage: Usage.CodexUsage): string {
@@ -340,7 +357,7 @@ export const CodexUsageFormat = {
   gauge,
   usageGauge,
   levelColor,
-  shortReset,
+  resetAt,
   compactGaugeText,
 }
 

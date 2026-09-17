@@ -24,6 +24,8 @@ type UsageState =
 type TuiColor = TuiPluginApi["theme"]["current"]["textMuted"]
 type TuiTheme = TuiPluginApi["theme"]["current"]
 type Runtime = ReturnType<typeof createRuntime>
+type SessionMessage = ReturnType<TuiPluginApi["state"]["session"]["messages"]>[number]
+type AssistantSessionMessage = Extract<SessionMessage, { role: "assistant" }>
 
 class AssistantProviderMessage extends Schema.Class<AssistantProviderMessage>("Tui.AssistantProviderMessage")({
   role: Schema.Literal("assistant"),
@@ -40,6 +42,68 @@ const EIGHTHS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
 const OK_AT = 50
 const WARN_AT = 75
 const DANGER_AT = 90
+const CONTEXT_WARN_AT = 40
+const CONTEXT_DANGER_AT = 70
+const MONEY = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+})
+
+function ContextView(props: { api: TuiPluginApi; session_id: string }) {
+  const theme = () => props.api.theme.current
+  const messages = createMemo(() => props.api.state.session.messages(props.session_id))
+  const session = createMemo(() => props.api.state.session.get(props.session_id))
+  const state = createMemo(() => {
+    const last = [...messages()].reverse().find(isCompleteAssistantMessage)
+    if (!last) return { tokens: 0, context: null, percent: null }
+
+    const tokens =
+      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    const model = props.api.state.provider.find((provider) => provider.id === last.providerID)?.models[last.modelID]
+    const context = model?.limit.context ?? null
+
+    return {
+      tokens,
+      context,
+      percent: context ? Math.round((tokens / context) * 100) : null,
+    }
+  })
+
+  const root = createElement("box")
+  const title = createElement("text")
+  const bold = createElement("b")
+  insertNode(root, title)
+  insertNode(title, bold)
+  insertNode(bold, createTextNode("Context"))
+  effect(() => setProp(title, "fg", theme().text))
+  insertNode(
+    root,
+    textLine(
+      () => formatContextUsage(state().tokens, state().context),
+      () => theme().textMuted,
+    ),
+  )
+  insertNode(
+    root,
+    textLine(
+      () => `${state().percent ?? 0}% used`,
+      () => contextPressureColor(state().percent, theme()),
+    ),
+  )
+  insertNode(
+    root,
+    textLine(
+      () => `${MONEY.format(session()?.cost ?? 0)} spent`,
+      () => theme().textMuted,
+    ),
+  )
+
+  return root
+}
+
+function isCompleteAssistantMessage(message: SessionMessage): message is AssistantSessionMessage {
+  return message.role === "assistant" && message.tokens.output > 0
+}
 
 function View(props: { api: TuiPluginApi; session_id: string; runtime: Runtime; onMissingCodex: () => void }) {
   const theme = () => props.api.theme.current
@@ -353,12 +417,29 @@ function compactGaugeText(usage: Usage.CodexUsage): string {
   return window ? `Codex ${window.label} ${Usage.formatPercent(window.usedPercent)}` : ""
 }
 
+function formatContextTokens(tokens: number): string {
+  return `${Math.floor(tokens / 1_000).toLocaleString("en-US")}k`
+}
+
+function formatContextUsage(tokens: number, context: number | null): string {
+  return `${formatContextTokens(tokens)} / ${context ? formatContextTokens(context) : "?"}`
+}
+
+function contextPressureColor(percent: number | null, theme: TuiTheme): TuiColor {
+  if (percent === null || percent < CONTEXT_WARN_AT) return theme.textMuted
+  if (percent >= CONTEXT_DANGER_AT) return theme.error
+  return theme.warning
+}
+
 export const CodexUsageFormat = {
   gauge,
   usageGauge,
   levelColor,
   resetAt,
   compactGaugeText,
+  formatContextTokens,
+  formatContextUsage,
+  contextPressureColor,
 }
 
 function isOpenAISession(api: TuiPluginApi, sessionID: string): boolean {
@@ -418,6 +499,22 @@ const plugin: TuiPluginModule & { id: string } = {
     }
 
     api.lifecycle.onDispose(() => runtime.dispose())
+
+    api.slots.register({
+      order: 100,
+      slots: {
+        sidebar_content(_ctx, props) {
+          const view = createComponent(ContextView, {
+            api,
+            get session_id() {
+              return props.session_id
+            },
+          })
+
+          return view as unknown as JSX.Element
+        },
+      },
+    })
 
     api.slots.register({
       order: 150,

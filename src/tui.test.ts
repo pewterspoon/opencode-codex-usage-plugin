@@ -7,6 +7,7 @@ const theme = {
   accent: "accent",
   warning: "warning",
   error: "error",
+  textMuted: "muted",
 } as never
 
 describe("CodexUsageFormat.gauge", () => {
@@ -47,5 +48,24 @@ describe("CodexUsageFormat.resetAt", () => {
   it("shows the local weekday and time instead of a countdown", () => {
     expect(CodexUsageFormat.resetAt(null, new Date(0))).toBe("?")
     expect(CodexUsageFormat.resetAt(3_600, new Date(0))).toMatch(/^[A-Z][a-z]{2} \d{1,2}:\d{2} [AP]M$/)
+  })
+})
+
+describe("CodexUsageFormat.context", () => {
+  it("shows used and total context in thousands", () => {
+    expect(CodexUsageFormat.formatContextTokens(80_756)).toBe("80k")
+    expect(CodexUsageFormat.formatContextUsage(80_756, 1_050_000)).toBe("80k / 1,050k")
+  })
+
+  it("shows an unknown total when model metadata is unavailable", () => {
+    expect(CodexUsageFormat.formatContextUsage(0, null)).toBe("0k / ?")
+  })
+
+  it("colors context pressure at the compaction thresholds", () => {
+    expect(CodexUsageFormat.contextPressureColor(null, theme)).toBe("muted")
+    expect(CodexUsageFormat.contextPressureColor(39, theme)).toBe("muted")
+    expect(CodexUsageFormat.contextPressureColor(40, theme)).toBe("warning")
+    expect(CodexUsageFormat.contextPressureColor(69, theme)).toBe("warning")
+    expect(CodexUsageFormat.contextPressureColor(70, theme)).toBe("error")
   })
 })

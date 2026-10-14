@@ -9,7 +9,19 @@ visual gauge language used by the OpenCode Go usage plugin.
 This document records the intended behavior and boundaries before any
 implementation changes are made.
 
-## Goals
+## Implemented V2 state (2026-10-14)
+
+The original V1 design below is retained as history; its `tui.json`, countdown, and application-logger references are not the current runtime contract. The local build now targets OpenCode 2.0.29:
+
+- Load the `dist` directory through `~/.config/opencode/cli.json`; a direct `dist/tui.js` target is silently skipped by V2. Disable the native duplicate with `-opencode.sidebar.context` only after the replacement loads.
+- Register `setup`, `context.ui.slot` (`sidebar.content` and `prompt.footer.status`), V2 `context.data`, and semantic theme tokens.
+- Display used/model-ceiling context from current model metadata, with the host's compaction/revert usage rules. The 628k GPT-6.1 Sol ceiling observed during verification was not an override introduced by this plugin.
+- Retain Codex's `account/rateLimits/read`, independent authentication ownership, fallback transport, cleanup, and absolute local reset times. Show whichever quota windows actually exist, including a single weekly gauge.
+- Use the host-owned Effect 4.0.1 and `Schema.TaggedError`; V2 rejects old beta dependencies and aliases. Its public SDK removed `client.app.log`, so quota errors remain visible in the panel instead of calling that unavailable method.
+- Start polling when both the view is enabled and OpenAI model data becomes available, including delayed model arrival after mounting. Scope compact-mode visibility to mounted sidebars for the same session.
+- Verification: 36 tests, typecheck/build, native rendering with `ensurePluginRuntime` foreign-package checks, discovery from the installed CLI configuration, and two fresh actual CLI launches showing live quota and one Context block.
+
+## Original V1 Goals
 
 - Show Codex 5-hour and weekly usage as compact gauges in the OpenCode TUI
   sidebar.

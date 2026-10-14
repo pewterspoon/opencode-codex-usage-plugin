@@ -1,35 +1,10 @@
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
-import { Array, Layer, Logger as EffectLogger, Predicate, References, type LogLevel } from "effect"
-
-type Level = "debug" | "info" | "warn" | "error"
-
-// Mapping from Effect log levels to OpenCode log levels
-const levels: Partial<Record<LogLevel.LogLevel, Level>> = {
-  Debug: "debug",
-  Trace: "debug",
-  Warn: "warn",
-  Error: "error",
-  Fatal: "error",
-}
-
-export const layer = (api: TuiPluginApi) => {
-  const logger = EffectLogger.make((options) => {
-    const [message, extra] = Array.ensure(options.message)
-
-    void api.client.app
-      .log({
-        directory: api.state.path.directory,
-        service: "opencode-codex-usage-plugin",
-        level: levels[options.logLevel] ?? "info",
-        message: String(message),
-        extra: Predicate.isObject(extra) ? extra : {},
-      })
-      .catch(() => undefined)
-  })
-
-  return EffectLogger.layer([logger]).pipe(Layer.merge(Layer.succeed(References.MinimumLogLevel, "Debug")))
-}
+import type { Plugin } from "@opencode/plugin/tui"
+import { Logger as EffectLogger } from "effect"
 
 export const noopLayer = EffectLogger.layer([])
+
+// V2's public client has no app.log endpoint. Keep errors visible in the usage
+// panel, rather than throwing from the removed SDK method or writing to the TUI.
+export const layer = (_api: Plugin.Context) => noopLayer
 
 export * as Logger from "./logger.js"

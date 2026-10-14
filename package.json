@@ -41,25 +41,28 @@
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build",
     "prepare": "effect-language-service patch",
     "test": "vitest run src",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test:render": "npx --yes bun@1.4.3 --conditions=browser tests/render.mjs",
+    "test:discovery": "node tests/discovery.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit --incremental false"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.17.9",
-    "@opentui/solid": "^0.4.1",
-    "effect": "4.0.0-beta.85",
+    "@opentui/solid": "0.5.17",
+    "effect": "4.0.1",
     "solid-js": "1.9.12"
   },
   "devDependencies": {
+    "@opencode/plugin": "2.0.29",
+    "@opencode/theme": "2.0.29",
     "@effect/language-service": "0.86.2",
-    "@effect/vitest": "4.0.0-beta.85",
+    "@effect/vitest": "4.0.1",
     "@types/node": "^24.10.1",
     "effect-solutions": "^0.5.3",
     "oxfmt": "^0.56.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.15"
+    "vitest": "^5.0.0"
   },
   "engines": {
-    "opencode": ">=1.17.0"
+    "opencode": ">=2.0.29"
   },
   "packageManager": "pnpm@10.33.0"
 }

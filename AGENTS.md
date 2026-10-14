@@ -74,7 +74,7 @@ Use these rules when writing Effect code.
 
 - Use `Schema.Class` for multi-field data.
 - Use branded schemas (`Schema.brand`) for single-value types.
-- Use `Schema.TaggedErrorClass` for typed errors.
+- Use `Schema.TaggedError` for typed errors under the host's Effect 4.0.1 API.
 - Use `Schema.Defect` instead of `unknown` for defect-like causes.
 - In `Effect.gen` / `Effect.fn`, prefer `yield* new MyError(...)` over `yield* Effect.fail(new MyError(...))` for direct early-failure branches.
 
@@ -98,6 +98,8 @@ The OpenCode repository at `~/.local/share/opencode/repos/github.com/anomalyco/o
 
 # OpenCode plugin rules
 
-- For plugin diagnostics, use the OpenCode SDK client exposed by the plugin API: `client.app.log({ service, level, message, extra })`.
+- This local port targets OpenCode 2.0.29 and its shared Effect 4.0.1. Use bare `effect` imports; older package-local copies and npm aliases are rejected by the CLI runtime. Validate the installed host API when a guide shows a beta-era API name.
+
+- V2's public SDK has no `client.app.log` endpoint. Keep failures visible in the usage panel; the current logger layer is intentionally silent. Do not call the old V1 method or print diagnostics into the terminal renderer.
 - OpenCode server logs are written under `~/.local/share/opencode/log/opencode.log`.
 - Debug-level plugin logs require OpenCode `logLevel: "DEBUG"` or `OPENCODE_LOG_LEVEL=DEBUG`; the desktop app's `Export Logs...` action includes server logs.

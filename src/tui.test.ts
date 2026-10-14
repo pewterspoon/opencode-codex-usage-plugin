@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Usage } from "./usage.js"
-import { CodexUsageFormat } from "./tui.js"
+import type { Context } from "@opencode/plugin/tui/context"
+import plugin, { CodexUsageFormat } from "./tui.js"
 
 const theme = {
   success: "success",
@@ -9,6 +10,64 @@ const theme = {
   error: "error",
   textMuted: "muted",
 } as never
+
+function v2Context(messages: unknown[], models: unknown[] = [], model = { providerID: "openai", id: "gpt-6.1-sol" }) {
+  return {
+    data: {
+      session: { get: () => ({ model, location: { directory: "/workspace" } }), message: { list: () => messages } },
+      location: { model: { list: () => models } },
+    },
+    ui: { model: { current: () => ({ providerID: model.providerID, modelID: model.id }) } },
+  } as unknown as Context
+}
+
+describe("OpenCode V2 sidebar compatibility", () => {
+  it("exposes the V2 setup entrypoint and registers additive sidebar slots", async () => {
+    expect(plugin).toHaveProperty("setup")
+    const placements: string[] = []
+    const context = {
+      ui: { slot: (claim: { prepend?: string; append?: string }) => {
+        placements.push(claim.prepend ?? claim.append ?? "")
+        return () => undefined
+      } },
+    } as unknown as Context
+    const cleanup = await plugin.setup(context)
+    expect(placements).toContain("sidebar.content")
+    expect(placements).toContain("prompt.footer.status")
+    await cleanup?.()
+  })
+
+  it("reads the V2 message/model shape and includes zero-output usage", () => {
+    const context = v2Context([
+      { id: "msg_one", type: "assistant", model: { providerID: "openai", id: "gpt-6.1-sol" },
+        tokens: { input: 120_000, output: 0, reasoning: 1_000, cache: { read: 38_000, write: 0 } } },
+      { id: "msg_streaming", type: "assistant", model: { providerID: "openai", id: "gpt-6.1-sol" } },
+    ], [{ providerID: "openai", id: "gpt-6.1-sol", limit: { context: 630_000 } }])
+    expect(CodexUsageFormat.contextState(context, "ses_test")).toEqual({ tokens: 159_000, context: 630_000, percent: 25 })
+  })
+
+  it("does not show stale pre-compaction usage", () => {
+    const context = v2Context([
+      { id: "msg_old", type: "assistant", model: { providerID: "openai", id: "gpt-6.1-sol" },
+        tokens: { input: 120_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } } },
+      { id: "msg_compact", type: "compaction", status: "completed" },
+    ], [{ providerID: "openai", id: "gpt-6.1-sol", limit: { context: 630_000 } }])
+    expect(CodexUsageFormat.contextState(context, "ses_test")).toEqual({ tokens: 0, context: 630_000, percent: 0 })
+  })
+
+  it("uses the V2 selected model ceiling when a new session has no recorded model", () => {
+    const context = v2Context([], [{ providerID: "openai", id: "gpt-6.1-sol", limit: { context: 630_000 } }])
+    context.data.session.get = (() => ({ location: { directory: "/workspace" } })) as never
+    expect(CodexUsageFormat.contextState(context, "ses_test")).toEqual({ tokens: 0, context: 630_000, percent: 0 })
+  })
+
+  it("detects OpenAI before the first assistant response and respects provider switches", () => {
+    expect(CodexUsageFormat.isOpenAISession(v2Context([]), "ses_test")).toBe(true)
+    const context = v2Context([{ type: "assistant", model: { providerID: "openai", id: "old" } }], [],
+      { providerID: "freetoken", id: "local" })
+    expect(CodexUsageFormat.isOpenAISession(context, "ses_test")).toBe(false)
+  })
+})
 
 describe("CodexUsageFormat.gauge", () => {
   it("clamps boundaries and renders partial cells", () => {

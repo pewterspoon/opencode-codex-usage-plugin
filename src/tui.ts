@@ -1,4 +1,4 @@
-import type { TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import type { Plugin } from "@opencode/plugin/tui"
 import type { JSX } from "@opentui/solid"
 import {
   createComponent,
@@ -8,10 +8,9 @@ import {
   insert,
   insertNode,
   setProp,
-  useTerminalDimensions,
 } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
-import { Effect, Layer, ManagedRuntime, Option, Predicate, Schema } from "effect"
+import { Effect, Layer, ManagedRuntime, Predicate } from "effect"
 import { CodexService } from "./codex.ts"
 import { Logger } from "./logger.js"
 import { Usage } from "./usage.js"
@@ -21,18 +20,12 @@ type UsageState =
   | { status: "ready"; usage: Usage.CodexUsage; message: string }
   | { status: "error"; usage: null; message: string }
 
-type TuiColor = TuiPluginApi["theme"]["current"]["textMuted"]
-type TuiTheme = TuiPluginApi["theme"]["current"]
+type TuiPluginApi = Plugin.Context
+type TuiColor = TuiPluginApi["theme"]["text"]["base"]
+type TuiTheme = Record<"text" | "textMuted" | "success" | "accent" | "warning" | "error", TuiColor>
 type Runtime = ReturnType<typeof createRuntime>
-type SessionMessage = ReturnType<TuiPluginApi["state"]["session"]["messages"]>[number]
-type AssistantSessionMessage = Extract<SessionMessage, { role: "assistant" }>
-
-class AssistantProviderMessage extends Schema.Class<AssistantProviderMessage>("Tui.AssistantProviderMessage")({
-  role: Schema.Literal("assistant"),
-  providerID: Schema.String,
-}) {}
-
-const decodeAssistantProviderMessage = Schema.decodeUnknownOption(AssistantProviderMessage)
+type SessionMessage = ReturnType<TuiPluginApi["data"]["session"]["message"]["list"]>[number]
+type AssistantSessionMessage = Extract<SessionMessage, { type: "assistant" }>
 
 const POLL_MS = 60_000
 const UI_TIMEOUT_MS = 15_000
@@ -50,24 +43,8 @@ const MONEY = new Intl.NumberFormat("en-US", {
 })
 
 function ContextView(props: { api: TuiPluginApi; session_id: string }) {
-  const theme = () => props.api.theme.current
-  const messages = createMemo(() => props.api.state.session.messages(props.session_id))
-  const session = createMemo(() => props.api.state.session.get(props.session_id))
-  const state = createMemo(() => {
-    const last = [...messages()].reverse().find(isCompleteAssistantMessage)
-    if (!last) return { tokens: 0, context: null, percent: null }
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    const model = props.api.state.provider.find((provider) => provider.id === last.providerID)?.models[last.modelID]
-    const context = model?.limit.context ?? null
-
-    return {
-      tokens,
-      context,
-      percent: context ? Math.round((tokens / context) * 100) : null,
-    }
-  })
+  const theme = () => themeColors(props.api)
+  const state = createMemo(() => contextState(props.api, props.session_id))
 
   const root = createElement("box")
   const title = createElement("text")
@@ -93,7 +70,7 @@ function ContextView(props: { api: TuiPluginApi; session_id: string }) {
   insertNode(
     root,
     textLine(
-      () => `${MONEY.format(session()?.cost ?? 0)} spent`,
+      () => `${MONEY.format(props.api.data.session.cost(props.session_id))} spent`,
       () => theme().textMuted,
     ),
   )
@@ -101,12 +78,9 @@ function ContextView(props: { api: TuiPluginApi; session_id: string }) {
   return root
 }
 
-function isCompleteAssistantMessage(message: SessionMessage): message is AssistantSessionMessage {
-  return message.role === "assistant" && message.tokens.output > 0
-}
-
-function View(props: { api: TuiPluginApi; session_id: string; runtime: Runtime; onMissingCodex: () => void }) {
-  const theme = () => props.api.theme.current
+function View(props: { api: TuiPluginApi; session_id: string; runtime: Runtime; onMissingCodex: () => void; mounted: (id: string) => () => void }) {
+  const theme = () => themeColors(props.api)
+  createEffect(() => onCleanup(props.mounted(props.session_id)))
   const { state, isOpenAI } = createUsagePolling(props)
 
   const root = createElement("box")
@@ -116,10 +90,9 @@ function View(props: { api: TuiPluginApi; session_id: string; runtime: Runtime; 
   return root
 }
 
-function CompactView(props: { api: TuiPluginApi; session_id: string; runtime: Runtime; onMissingCodex: () => void }) {
-  const dimensions = useTerminalDimensions()
-  const theme = () => props.api.theme.current
-  const sidebarHidden = createMemo(() => !isSidebarVisible(props.api, props.session_id, dimensions().width))
+function CompactView(props: { api: TuiPluginApi; session_id: string; runtime: Runtime; onMissingCodex: () => void; sidebarVisible: (id: string) => boolean }) {
+  const theme = () => themeColors(props.api)
+  const sidebarHidden = createMemo(() => !props.sidebarVisible(props.session_id))
   const { state, isOpenAI } = createUsagePolling({
     api: props.api,
     get session_id() {
@@ -193,7 +166,7 @@ function createUsagePolling(props: {
       setState({
         status: "error",
         usage: null,
-        message: "Still waiting; check OpenCode server logs.",
+        message: "Still waiting for Codex; retry or check Codex CLI sign-in.",
       })
       props.api.renderer.requestRender()
     }, UI_TIMEOUT_MS)
@@ -229,11 +202,11 @@ function createUsagePolling(props: {
   }
 
   createEffect(() => {
-    if (enabled()) untrack(() => void refresh())
+    if (enabled() && isOpenAI()) untrack(() => void refresh())
   })
   timer = setInterval(() => void refresh(), POLL_MS)
-  const unsubscribeMessage = props.api.event.on("message.updated", () => void refresh())
-  const unsubscribeSession = props.api.event.on("session.updated", () => void refresh())
+  const unsubscribeMessage = props.api.data.on("session.step.ended", () => void refresh())
+  const unsubscribeSession = props.api.data.on("session.model.selected", () => void refresh())
 
   onCleanup(() => {
     disposed = true
@@ -440,24 +413,46 @@ export const CodexUsageFormat = {
   formatContextTokens,
   formatContextUsage,
   contextPressureColor,
+  contextState,
+  isOpenAISession,
 }
 
 function isOpenAISession(api: TuiPluginApi, sessionID: string): boolean {
-  const messages = api.state.session.messages(sessionID)
-  const lastProviderID = [...messages].reverse().map(readAssistantProviderID).find(Boolean)
-
-  if (lastProviderID) return lastProviderID === "openai"
-
-  return api.state.config.model?.startsWith("openai/") ?? false
+  const selected = api.data.session.get(sessionID)?.model
+  if (selected) return selected.providerID === "openai"
+  const last = api.data.session.message.list(sessionID).findLast((message) => message.type === "assistant")
+  return (last?.type === "assistant" ? last.model : api.ui.model.current())?.providerID === "openai"
 }
 
-function readAssistantProviderID(message: unknown): string | undefined {
-  return Option.getOrUndefined(decodeAssistantProviderMessage(message))?.providerID
+function contextState(api: TuiPluginApi, sessionID: string) {
+  const messages = api.data.session.message.list(sessionID)
+  const session = api.data.session.get(sessionID)
+  const boundary = session?.revert?.messageID
+  const boundaryIndex = boundary ? messages.findIndex((message) => message.id === boundary) : -1
+  const end = boundary ? Math.max(0, boundaryIndex) : messages.length
+  const compact = messages.findLastIndex((message, index) =>
+    index < end && message.type === "compaction" && message.status === "completed")
+  const last = messages.findLast((message, index): message is AssistantSessionMessage & { tokens: NonNullable<AssistantSessionMessage["tokens"]> } =>
+    index > compact && index < end && message.type === "assistant" && message.tokens !== undefined)
+  const tokens = last ? last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write : 0
+  const selected = api.ui.model.current()
+  const ref = last?.model ?? session?.model ?? (selected ? { providerID: selected.providerID, id: selected.modelID } : undefined)
+  const model = api.data.location.model.list(session?.location)?.find((candidate) =>
+    candidate.providerID === ref?.providerID && candidate.id === ref?.id)
+  const context = model?.limit.context ?? null
+  return { tokens, context, percent: context ? Math.round(tokens / context * 100) : null }
 }
 
-function isSidebarVisible(api: TuiPluginApi, sessionID: string, width: number): boolean {
-  if (api.state.session.get(sessionID)?.parentID) return false
-  return api.kv.get<"auto" | "hide">("sidebar", "auto") === "auto" && width > 120
+function themeColors(api: TuiPluginApi): TuiTheme {
+  const theme = api.theme
+  return {
+    text: theme.text.base,
+    textMuted: theme.text.muted,
+    success: theme.text.feedback.success.base,
+    accent: theme.text.action.primary.base,
+    warning: theme.text.feedback.warning.base,
+    error: theme.text.feedback.error.base,
+  }
 }
 
 function createRuntime(api: TuiPluginApi) {
@@ -481,9 +476,9 @@ function errorMessage(error: unknown): string {
   return "Usage unavailable"
 }
 
-const plugin: TuiPluginModule & { id: string } = {
+const plugin: Plugin.Definition = {
   id: "opencode-codex-usage",
-  tui: async (api) => {
+  setup: async (api) => {
     const runtime = createRuntime(api)
     debug(runtime, "plugin.init", {})
     let warnedMissingCodex = false
@@ -491,62 +486,58 @@ const plugin: TuiPluginModule & { id: string } = {
     const warnMissingCodex = () => {
       if (warnedMissingCodex) return
       warnedMissingCodex = true
-      api.ui.toast({
+      api.ui.toast.show({
         variant: "warning",
         title: "Codex required",
         message: "Install Codex.app or the Codex CLI to see usage stats.",
       })
     }
 
-    api.lifecycle.onDispose(() => runtime.dispose())
-
-    api.slots.register({
-      order: 100,
-      slots: {
-        sidebar_content(_ctx, props) {
-          const view = createComponent(ContextView, {
-            api,
-            get session_id() {
-              return props.session_id
-            },
-          })
-
-          return view as unknown as JSX.Element
-        },
+    const [sidebars, setSidebars] = createSignal<Record<string, number>>({})
+    const mounted = (id: string) => {
+      setSidebars((state) => ({ ...state, [id]: (state[id] ?? 0) + 1 }))
+      return () => setSidebars((state) => ({ ...state, [id]: Math.max(0, (state[id] ?? 1) - 1) }))
+    }
+    const removeContext = api.ui.slot({
+      prepend: "sidebar.content",
+      render(props) {
+        return createComponent(ContextView, {
+          api,
+          get session_id() { return props.sessionID },
+        }) as unknown as JSX.Element
       },
     })
-
-    api.slots.register({
-      order: 150,
-      slots: {
-        sidebar_content(_ctx, props) {
-          const view = createComponent(View, {
-            api,
-            get session_id() {
-              return props.session_id
-            },
-            runtime,
-            onMissingCodex: warnMissingCodex,
-          })
-
-          // OpenTUI's runtime primitives return renderables, while the slot API is typed through Solid's JSX facade.
-          return view as unknown as JSX.Element
-        },
-        session_prompt_right(_ctx, props) {
-          const view = createComponent(CompactView, {
-            api,
-            get session_id() {
-              return props.session_id
-            },
-            runtime,
-            onMissingCodex: warnMissingCodex,
-          })
-
-          // OpenTUI's runtime primitives return renderables, while the slot API is typed through Solid's JSX facade.
-          return view as unknown as JSX.Element
-        },
+    const removeUsage = api.ui.slot({
+      prepend: "sidebar.content",
+      render(props) {
+        return createComponent(View, {
+          api,
+          get session_id() { return props.sessionID },
+          runtime,
+          onMissingCodex: warnMissingCodex,
+          mounted,
+        }) as unknown as JSX.Element
       },
     })
+    const removeCompact = api.ui.slot({
+      append: "prompt.footer.status",
+      render(props) {
+        if (!props.sessionID) return null as unknown as JSX.Element
+        return createComponent(CompactView, {
+          api,
+          get session_id() { return props.sessionID! },
+          runtime,
+          onMissingCodex: warnMissingCodex,
+          sidebarVisible: (id) => (sidebars()[id] ?? 0) > 0,
+        }) as unknown as JSX.Element
+      },
+    })
+    return async () => {
+      removeContext()
+      removeUsage()
+      removeCompact()
+      await runtime.dispose()
+    }
   },
 }
 

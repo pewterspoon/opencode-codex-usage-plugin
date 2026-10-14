@@ -1,5 +1,50 @@
 # opencode-codex-usage-plugin
 
+## Local OpenCode V2 port
+
+This checkout was migrated and cold-start verified against OpenCode **2.0.29**
+on 2026-10-14. It restores Codex quota gauges and the customized
+`used / model ceiling` Context panel. Two separate fresh CLI launches rendered
+both, with one Context block; no model limits or OAuth files were changed.
+
+V2 must load the **directory** containing `tui.js`, not the file itself:
+
+```jsonc
+// ~/.config/opencode/cli.json
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": [
+    "file:///home/sam/.config/opencode/local-plugins/codex-usage/dist",
+    "-opencode.sidebar.context"
+  ]
+}
+```
+
+The transport now uses the host's Effect **4.0.1** and `Schema.TaggedError`.
+Old beta Effect releases and npm aliases are not restart-safe under V2's shared
+module rules. The tests install those real host rules, exercise late model data,
+and use a fake Codex subprocess without making inference requests.
+
+```sh
+npx --yes pnpm@10.33.0 install --ignore-scripts
+npx --yes pnpm@10.33.0 build
+npm test
+npm run typecheck
+npm run test:render
+npm run test:discovery
+```
+
+V2 removed the public `client.app.log` endpoint; quota errors stay visible in
+the panel rather than being sent to that unsupported method. Codex CLI
+authentication remains separate from OpenCode authentication. Reset times in
+this local customization are absolute weekday/local-time values.
+
+The upstream installation instructions below describe the original V1 plugin,
+not this local V2 build. Do not replace this checkout with an upstream package
+until that package's V2 support has been independently verified.
+
+## Upstream V1 documentation
+
 An [OpenCode](https://opencode.ai) TUI sidebar plugin that shows Codex 5-hour and weekly quota usage as compact gauges with reset countdowns.
 
 ```text
